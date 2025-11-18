@@ -29,7 +29,7 @@ class AnalyzerAgent:
         Returns:
             Python script as string
         """
-        prompt = ANALYZER_PROMPT.format(filename=data_file.filename)
+        prompt = ANALYZER_PROMPT.format(filename=data_file.path)
         response = self.llm.chat(prompt)
         return self.llm.extract_code_block(response)
 

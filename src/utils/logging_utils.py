@@ -136,3 +136,42 @@ def log_final_solution(
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(final_log, f, indent=2)
 
+
+def save_data_descriptions(
+    descriptions: list,
+    log_dir: str,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """
+    Save data descriptions to disk for inspection and caching.
+
+    Args:
+        descriptions: List of DataDescription objects
+        log_dir: Directory for logs
+        logger: Optional logger instance
+    """
+    from src.core.models import DataDescription
+    
+    descriptions_data = []
+    for desc in descriptions:
+        descriptions_data.append({
+            "filename": desc.file.filename,
+            "path": desc.file.path,
+            "extension": desc.file.extension,
+            "description": desc.description,
+            "script": desc.script,
+            "error": desc.error,
+        })
+
+    log_file = Path(log_dir) / "data_descriptions.json"
+    with open(log_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "timestamp": datetime.now().isoformat(),
+            "total_files": len(descriptions),
+            "successful": sum(1 for d in descriptions if not d.error),
+            "descriptions": descriptions_data,
+        }, f, indent=2)
+    
+    if logger:
+        logger.info(f"Saved data descriptions to {log_file}")
+
