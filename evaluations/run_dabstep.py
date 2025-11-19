@@ -195,6 +195,18 @@ def run_benchmark(
     agent.prepare_data()
     print(f"✓ Data analysis complete and cached")
     
+    run_id = f"ds-star_{split}_{int(time.time())}"
+    
+    output_dir = Path("./runs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    results_file = output_dir / f"{run_id}.jsonl"
+    submission_file = output_dir / f"{run_id}_submission.jsonl"
+    
+    print(f"\n💾 Results will be saved incrementally to:")
+    print(f"   {results_file}")
+    print(f"   {submission_file}")
+    
     # Run on all tasks
     print(f"\n🚀 Running DS-STAR on {len(dataset)} tasks...")
     agent_answers = []
@@ -204,25 +216,51 @@ def run_benchmark(
         try:
             result = run_ds_star_on_task(agent, task)
             agent_answers.append(result)
+            
+            _save_single_result(result, results_file, submission_file)
+            
         except KeyboardInterrupt:
-            print("\n\n⚠️  Interrupted by user. Saving partial results...")
+            print("\n\n⚠️  Interrupted by user. Partial results already saved.")
             break
         except Exception as e:
             print(f"\n✗ Unexpected error in task loop: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
-            agent_answers.append({
+            error_result = {
                 "task_id": str(task.get('task_id', 'unknown')),
                 "agent_answer": "",
                 "error": f"Loop error: {type(e).__name__}: {str(e)}",
                 "success": False,
-            })
+            }
+            agent_answers.append(error_result)
+            
+            _save_single_result(error_result, results_file, submission_file)
             continue
     
-    # Generate run ID
-    run_id = f"ds-star_{split}_{int(time.time())}"
-    
     return agent_answers, run_id
+
+
+def _save_single_result(result: dict, results_file: Path, submission_file: Path):
+    """
+    Append a single result to both output files.
+    
+    Args:
+        result: Result dictionary from run_ds_star_on_task
+        results_file: Path to full results JSONL file
+        submission_file: Path to submission JSONL file
+    """
+    with open(results_file, "a") as f:
+        f.write(json.dumps(result) + "\n")
+    
+    submission_entry = {
+        "task_id": result["task_id"],
+        "agent_answer": result.get("agent_answer", ""),
+    }
+    if "final_code" in result:
+        submission_entry["reasoning_trace"] = result["final_code"]
+    
+    with open(submission_file, "a") as f:
+        f.write(json.dumps(submission_entry) + "\n")
 
 
 def save_results(agent_answers: list[dict], run_id: str, output_dir: str = "./runs"):
@@ -277,52 +315,6 @@ def save_submission(agent_answers: list[dict], run_id: str, output_dir: str = ".
     print(f"📤 Submission file saved to: {submission_file}")
     return submission_file
 
-
-def evaluate_results(agent_answers: list[dict], split: str = "dev"):
-    """
-    Evaluate results using DABStep evaluation logic.
-    
-    Args:
-        agent_answers: List of agent answers
-        split: Dataset split used
-    """
-    try:
-        from dabstep_benchmark.utils import evaluate
-        
-        print(f"\n📈 Evaluating results...")
-        
-        tasks_df = datasets.load_dataset(
-            "adyen/DABstep", 
-            name="tasks", 
-            split=split
-        ).to_pandas()
-        
-        agent_answers_df = pd.DataFrame(agent_answers)
-        
-        task_scores = evaluate(
-            agent_answers=agent_answers_df, 
-            tasks_with_gt=tasks_df
-        )
-        
-        task_scores_df = pd.DataFrame(task_scores)
-        task_scores_df["correct_answer"] = tasks_df["answer"]
-        task_scores_df["question"] = tasks_df["question"]
-        
-        print(f"\n{'='*80}")
-        print("EVALUATION RESULTS")
-        print(f"{'='*80}")
-        print(f"Total tasks: {len(task_scores_df)}")
-        print(f"Correct: {task_scores_df['is_correct'].sum()}")
-        print(f"Accuracy: {task_scores_df['is_correct'].mean():.2%}")
-        print(f"{'='*80}\n")
-        
-        print(task_scores_df[['task_id', 'is_correct', 'question']])
-        
-        return task_scores_df
-        
-    except ImportError:
-        print("\n⚠️  dabstep_benchmark not installed. Skipping evaluation.")
-        return None
 
 
 def main():
@@ -384,8 +376,8 @@ def main():
     )
     total_time = time.time() - start_time
     
-    output_file = save_results(agent_answers, run_id)
-    submission_file = save_submission(agent_answers, run_id)
+    output_file = Path("./runs") / f"{run_id}.jsonl"
+    submission_file = Path("./runs") / f"{run_id}_submission.jsonl"
     
     successful = sum(1 for a in agent_answers if a.get("success", False))
     print(f"\n{'='*80}")
