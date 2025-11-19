@@ -33,6 +33,7 @@ from src.utils.logging_utils import (
     log_final_solution,
     save_data_descriptions,
     load_data_descriptions,
+    log_prompt,
 )
 
 
@@ -226,6 +227,9 @@ class DSStar:
             import hashlib
             query_id = f"query_{hashlib.md5(question.encode()).hexdigest()[:8]}"
         
+        # Set logging context for LLM prompts
+        self.llm.set_logging_context(self.config.log_dir, query_id)
+        
         self.logger.info(f"Starting DS-STAR for question: {question}")
         self.logger.info(f"Query ID: {query_id}")
 
@@ -259,8 +263,15 @@ class DSStar:
         try:
             result = self._execute_with_debug(code, data_descriptions)
             self.logger.info(f"Initial plan executed: {result.success}")
+            if not result.success:
+                self.logger.warning(f"Execution failed: {result.error}")
+        except KeyboardInterrupt:
+            self.logger.error("KeyboardInterrupt: User interrupted execution")
+            raise
         except Exception as e:
             self.logger.error(f"Unexpected error during execution: {type(e).__name__}: {str(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise
 
         for round_num in range(self.config.max_rounds):

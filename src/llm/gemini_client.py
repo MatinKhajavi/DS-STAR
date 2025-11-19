@@ -45,6 +45,8 @@ class GeminiClient(BaseLLMClient):
         Returns:
             The model's response
         """
+        self._log_prompt(prompt, system_prompt)
+        
         try:
             if system_prompt:
                 response = self.client.models.generate_content(

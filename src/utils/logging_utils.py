@@ -191,6 +191,45 @@ def save_data_descriptions(
         logger.info(f"Saved data descriptions to {log_file}")
 
 
+def log_prompt(
+    prompt: str,
+    agent_name: str,
+    step: str,
+    log_dir: str,
+    query_id: Optional[str] = None,
+) -> None:
+    """
+    Save LLM prompts to disk for inspection and debugging.
+    
+    Args:
+        prompt: The full prompt being sent to the LLM
+        agent_name: Name of the agent (e.g., "planner", "coder")
+        step: Description of the step (e.g., "initial_plan", "fix_code")
+        log_dir: Directory for logs
+        query_id: Optional query identifier
+    """
+    if query_id:
+        prompt_dir = Path(log_dir) / query_id / "prompts"
+    else:
+        prompt_dir = Path(log_dir) / "prompts"
+    
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%H%M%S")
+    filename = f"{timestamp}_{agent_name}_{step}.txt"
+    prompt_file = prompt_dir / filename
+    
+    with open(prompt_file, "w", encoding="utf-8") as f:
+        f.write("=" * 80 + "\n")
+        f.write(f"AGENT: {agent_name}\n")
+        f.write(f"STEP: {step}\n")
+        f.write(f"TIMESTAMP: {datetime.now().isoformat()}\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(prompt)
+        f.write("\n\n")
+        f.write("=" * 80 + "\n")
+
+
 def load_data_descriptions(
     log_dir: str,
     logger: Optional[logging.Logger] = None,
