@@ -4,12 +4,12 @@
 echo "🚀 DS-STAR Quick Test on DABStep"
 echo "================================"
 echo ""
-echo "Running on first 3 tasks from dev split..."
+echo "Running on first 10 tasks from dev split..."
 echo ""
 
 if poetry run python evaluations/run_dabstep.py \
     --split dev \
-    --max-tasks 3 \
+    --max-tasks 10 \
     --model gemini-2.5-pro \
     --provider gemini \
     --max-rounds 20; then

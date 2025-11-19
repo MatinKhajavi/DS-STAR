@@ -201,8 +201,23 @@ def run_benchmark(
     
     for i, task in enumerate(dataset):
         print(f"\n[{i+1}/{len(dataset)}]", end=" ")
-        result = run_ds_star_on_task(agent, task)
-        agent_answers.append(result)
+        try:
+            result = run_ds_star_on_task(agent, task)
+            agent_answers.append(result)
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Interrupted by user. Saving partial results...")
+            break
+        except Exception as e:
+            print(f"\n✗ Unexpected error in task loop: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            agent_answers.append({
+                "task_id": str(task.get('task_id', 'unknown')),
+                "agent_answer": "",
+                "error": f"Loop error: {type(e).__name__}: {str(e)}",
+                "success": False,
+            })
+            continue
     
     # Generate run ID
     run_id = f"ds-star_{split}_{int(time.time())}"
@@ -225,6 +240,44 @@ def save_results(agent_answers: list[dict], run_id: str, output_dir: str = "./ru
     return output_file
 
 
+def save_submission(agent_answers: list[dict], run_id: str, output_dir: str = "./runs"):
+    """
+    Save results in DABStep submission format.
+    
+    Submission format (JSONL):
+    - task_id: required
+    - agent_answer: required
+    - reasoning_trace: optional
+    
+    Args:
+        agent_answers: List of agent answer dictionaries
+        run_id: Run identifier
+        output_dir: Output directory
+        
+    Returns:
+        Path to submission file
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    submission_file = output_dir / f"{run_id}_submission.jsonl"
+    
+    with open(submission_file, "w") as f:
+        for answer in agent_answers:
+            submission_entry = {
+                "task_id": answer["task_id"],
+                "agent_answer": answer.get("agent_answer", ""),
+            }
+
+            if "final_code" in answer:
+                submission_entry["reasoning_trace"] = answer["final_code"]
+            
+            f.write(json.dumps(submission_entry) + "\n")
+    
+    print(f"📤 Submission file saved to: {submission_file}")
+    return submission_file
+
+
 def evaluate_results(agent_answers: list[dict], split: str = "dev"):
     """
     Evaluate results using DABStep evaluation logic.
@@ -238,28 +291,23 @@ def evaluate_results(agent_answers: list[dict], split: str = "dev"):
         
         print(f"\n📈 Evaluating results...")
         
-        # Load ground truth
         tasks_df = datasets.load_dataset(
             "adyen/DABstep", 
             name="tasks", 
             split=split
         ).to_pandas()
         
-        # Convert to DataFrame
         agent_answers_df = pd.DataFrame(agent_answers)
         
-        # Evaluate
         task_scores = evaluate(
             agent_answers=agent_answers_df, 
             tasks_with_gt=tasks_df
         )
         
-        # Add context
         task_scores_df = pd.DataFrame(task_scores)
         task_scores_df["correct_answer"] = tasks_df["answer"]
         task_scores_df["question"] = tasks_df["question"]
         
-        # Print summary
         print(f"\n{'='*80}")
         print("EVALUATION RESULTS")
         print(f"{'='*80}")
@@ -268,14 +316,12 @@ def evaluate_results(agent_answers: list[dict], split: str = "dev"):
         print(f"Accuracy: {task_scores_df['is_correct'].mean():.2%}")
         print(f"{'='*80}\n")
         
-        # Show detailed results
         print(task_scores_df[['task_id', 'is_correct', 'question']])
         
         return task_scores_df
         
     except ImportError:
         print("\n⚠️  dabstep_benchmark not installed. Skipping evaluation.")
-        print("Install with: pip install git+https://git@hf.co/spaces/adyen/DABstep.git@main")
         return None
 
 
@@ -328,7 +374,6 @@ def main():
     print("DS-STAR on DABStep Benchmark")
     print("="*80)
     
-    # Run benchmark
     start_time = time.time()
     agent_answers, run_id = run_benchmark(
         split=args.split,
@@ -339,10 +384,9 @@ def main():
     )
     total_time = time.time() - start_time
     
-    # Save results
     output_file = save_results(agent_answers, run_id)
+    submission_file = save_submission(agent_answers, run_id)
     
-    # Print summary
     successful = sum(1 for a in agent_answers if a.get("success", False))
     print(f"\n{'='*80}")
     print("SUMMARY")
@@ -352,10 +396,10 @@ def main():
     print(f"Failed: {len(agent_answers) - successful}")
     print(f"Total time: {total_time:.2f}s")
     print(f"Avg time per task: {total_time/len(agent_answers):.2f}s")
-    print(f"Results: {output_file}")
+    print(f"Full results: {output_file}")
+    print(f"Submission file: {submission_file}")
     print(f"{'='*80}\n")
     
-    # Evaluate if requested
     if args.evaluate:
         evaluate_results(agent_answers, args.split)
 
