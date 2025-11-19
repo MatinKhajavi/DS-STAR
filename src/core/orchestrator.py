@@ -27,7 +27,13 @@ from src.agents import (
     FinalizerAgent,
 )
 from src.utils.filesystem import discover_data_files, ensure_directory
-from src.utils.logging_utils import setup_logger, log_iteration, log_final_solution, save_data_descriptions
+from src.utils.logging_utils import (
+    setup_logger,
+    log_iteration,
+    log_final_solution,
+    save_data_descriptions,
+    load_data_descriptions,
+)
 
 
 class DSStar:
@@ -51,7 +57,8 @@ class DSStar:
 
         self.llm = self._create_llm_client(self.config.llm)
 
-        self.executor = CodeExecutor()
+        # Create executor with 5-minute timeout to prevent infinite loops
+        self.executor = CodeExecutor(timeout=300)
 
         self.analyzer = AnalyzerAgent(self.llm, self.executor)
         self.planner = PlannerAgent(self.llm)
@@ -126,20 +133,38 @@ class DSStar:
         
         return descriptions
 
-    def prepare_data(self, data_dir: Optional[str] = None) -> None:
+    def prepare_data(self, data_dir: Optional[str] = None, force_reanalyze: bool = False) -> None:
         """
         Pre-analyze data files and cache descriptions.
         
         This is useful to analyze files once before running multiple queries.
         Call this method once after initialization to avoid re-analyzing files
-        on every query.
+        on every query. Will attempt to load from cache if available.
 
         Args:
             data_dir: Directory containing data files (if None, uses config.data_dir)
+            force_reanalyze: If True, ignore cache and re-analyze all files
         """
         data_dir = data_dir or self.config.data_dir
         
-        self.logger.info(f"Pre-analyzing data files in {data_dir}")
+        if not force_reanalyze:
+            self.logger.info("Checking for cached data descriptions...")
+            cached_descriptions = load_data_descriptions(self.config.log_dir, self.logger)
+            
+            if cached_descriptions:
+                data_files = discover_data_files(data_dir)
+                cached_paths = {desc.file.path for desc in cached_descriptions}
+                current_paths = {df.path for df in data_files}
+                
+                if cached_paths == current_paths:
+                    self.logger.info(f"✓ Using cached descriptions for {len(cached_descriptions)} files")
+                    self._data_descriptions = cached_descriptions
+                    self._analyzed_data_dir = data_dir
+                    return
+                else:
+                    self.logger.info("Cache mismatch: files have changed, re-analyzing...")
+        
+        self.logger.info(f"Analyzing data files in {data_dir}")
         
         data_files = discover_data_files(data_dir)
         self.logger.info(f"Discovered {len(data_files)} data files")
@@ -181,6 +206,7 @@ class DSStar:
         question: str,
         data_dir: Optional[str] = None,
         guidelines: Optional[str] = None,
+        query_id: Optional[str] = None,
     ) -> tuple[str, str]:
         """
         Run DS-STAR to answer a question using data files.
@@ -191,11 +217,17 @@ class DSStar:
             question: The question to answer
             data_dir: Directory containing data files (if None, uses config.data_dir)
             guidelines: Optional formatting guidelines
+            query_id: Optional identifier for this query (for logging organization)
 
         Returns:
             Tuple of (final_code, final_result)
         """
+        if query_id is None:
+            import hashlib
+            query_id = f"query_{hashlib.md5(question.encode()).hexdigest()[:8]}"
+        
         self.logger.info(f"Starting DS-STAR for question: {question}")
+        self.logger.info(f"Query ID: {query_id}")
 
         data_dir = data_dir or self.config.data_dir
 
@@ -215,13 +247,21 @@ class DSStar:
             self._analyzed_data_dir = data_dir
             self.logger.info(f"Cached descriptions for {len(data_descriptions)} files")
 
+        self.logger.info("Generating initial plan...")
         plan_step_0 = self.planner.generate_initial_plan(question, data_descriptions)
+        self.logger.info(f"Initial plan: {plan_step_0.description[:100]}...")
         plan = [plan_step_0]
 
+        self.logger.info("Implementing initial plan...")
         code = self.coder.implement_initial_plan(plan_step_0, data_descriptions)
-        result = self._execute_with_debug(code, data_descriptions)
-
-        self.logger.info(f"Initial plan executed: {result.success}")
+        self.logger.info(f"Generated code ({len(code)} chars), executing...")
+        
+        try:
+            result = self._execute_with_debug(code, data_descriptions)
+            self.logger.info(f"Initial plan executed: {result.success}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error during execution: {type(e).__name__}: {str(e)}")
+            raise
 
         for round_num in range(self.config.max_rounds):
             iteration = IterationState(
@@ -236,7 +276,7 @@ class DSStar:
             )
             iteration.verification = verification
 
-            log_iteration(self.logger, iteration, self.config.log_dir, question)
+            log_iteration(self.logger, iteration, self.config.log_dir, question, query_id)
 
             if verification.status == VerificationStatus.SUFFICIENT:
                 self.logger.info(f"Plan verified as sufficient at round {round_num}")
@@ -281,6 +321,7 @@ class DSStar:
             final_code,
             final_result.output,
             len(plan),
+            query_id,
         )
 
         self.logger.info("DS-STAR completed successfully")

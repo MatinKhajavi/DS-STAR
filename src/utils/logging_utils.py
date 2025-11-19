@@ -54,6 +54,7 @@ def log_iteration(
     iteration: IterationState,
     log_dir: str,
     question: str,
+    query_id: Optional[str] = None,
 ) -> None:
     """
     Log details of an iteration to file.
@@ -63,6 +64,7 @@ def log_iteration(
         iteration: Iteration state
         log_dir: Directory for detailed logs
         question: The question being answered
+        query_id: Optional query identifier for subdirectory organization
     """
     logger.info(f"Round {iteration.round_number}: {len(iteration.plan)} steps in plan")
 
@@ -97,8 +99,13 @@ def log_iteration(
         ),
     }
 
-    # Write to JSON file
-    log_file = Path(log_dir) / f"iteration_{iteration.round_number}.json"
+    if query_id:
+        query_log_dir = Path(log_dir) / query_id
+        query_log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = query_log_dir / f"iteration_{iteration.round_number}.json"
+    else:
+        log_file = Path(log_dir) / f"iteration_{iteration.round_number}.json"
+    
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(iteration_log, f, indent=2)
 
@@ -110,6 +117,7 @@ def log_final_solution(
     code: str,
     result: str,
     total_rounds: int,
+    query_id: Optional[str] = None,
 ) -> None:
     """
     Log the final solution.
@@ -121,6 +129,7 @@ def log_final_solution(
         code: Final code
         result: Final result
         total_rounds: Total number of rounds
+        query_id: Optional query identifier for subdirectory organization
     """
     logger.info(f"Final solution generated after {total_rounds} rounds")
 
@@ -132,7 +141,13 @@ def log_final_solution(
         "timestamp": datetime.now().isoformat(),
     }
 
-    log_file = Path(log_dir) / "final_solution.json"
+    if query_id:
+        query_log_dir = Path(log_dir) / query_id
+        query_log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = query_log_dir / "final_solution.json"
+    else:
+        log_file = Path(log_dir) / "final_solution.json"
+    
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump(final_log, f, indent=2)
 
@@ -174,4 +189,59 @@ def save_data_descriptions(
     
     if logger:
         logger.info(f"Saved data descriptions to {log_file}")
+
+
+def load_data_descriptions(
+    log_dir: str,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[list]:
+    """
+    Load cached data descriptions from disk if available.
+
+    Args:
+        log_dir: Directory containing cached descriptions
+        logger: Optional logger instance
+
+    Returns:
+        List of DataDescription objects if cache exists, None otherwise
+    """
+    from src.core.models import DataDescription, DataFile
+    
+    cache_file = Path(log_dir) / "data_descriptions.json"
+    
+    if not cache_file.exists():
+        if logger:
+            logger.info("No cached data descriptions found")
+        return None
+    
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+        
+        descriptions = []
+        for desc_data in cache_data.get("descriptions", []):
+            data_file = DataFile(
+                path=desc_data["path"],
+                filename=desc_data["filename"],
+                extension=desc_data["extension"],
+            )
+            
+            description = DataDescription(
+                file=data_file,
+                script=desc_data["script"],
+                description=desc_data["description"],
+                error=desc_data.get("error"),
+            )
+            descriptions.append(description)
+        
+        if logger:
+            logger.info(f"Loaded {len(descriptions)} cached data descriptions from {cache_file}")
+            logger.info(f"Cache timestamp: {cache_data.get('timestamp', 'unknown')}")
+        
+        return descriptions
+    
+    except Exception as e:
+        if logger:
+            logger.warning(f"Failed to load cached descriptions: {e}")
+        return None
 

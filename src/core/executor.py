@@ -5,26 +5,43 @@ Simplified executor that allows LLM-generated code to run with minimal restricti
 
 import io
 import time
+import signal
 from contextlib import redirect_stdout, redirect_stderr
 from typing import Any, Dict, Optional
 
 from src.core.models import ExecutionResult
 
 
+class TimeoutException(Exception):
+    """Raised when code execution exceeds timeout."""
+    pass
+
+
+def timeout_handler(signum, frame):
+    """Signal handler for execution timeout."""
+    raise TimeoutException("Code execution timed out")
+
+
 class CodeExecutor:
     """Wrapper for code execution with output capture.
     
-    NOTE: All safety restrictions removed
+    NOTE: All safety restrictions removed for DS-STAR LLM-generated code execution.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, timeout: int = 300):
+        """
+        Initialize code executor.
+        
+        Args:
+            timeout: Maximum execution time in seconds (default: 300 = 5 minutes)
+        """
+        self.timeout = timeout
 
     def execute(
         self, code: str, globals_dict: Optional[Dict[str, Any]] = None
     ) -> ExecutionResult:
         """
-        Execute Python code and return results.
+        Execute Python code and return results with timeout protection.
 
         Args:
             code: Python code to execute
@@ -45,13 +62,32 @@ class CodeExecutor:
         if '__builtins__' not in globals_dict:
             globals_dict['__builtins__'] = __builtins__
 
+        old_handler = None
+        try:
+            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(self.timeout)
+        except (AttributeError, ValueError):
+            pass
+
         try:
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 exec(code, globals_dict)
+        except TimeoutException as e:
+            returncode = 1
+            error = f"TimeoutException: Code execution exceeded {self.timeout} seconds"
+            stderr_capture.write(error)
         except Exception as e:
             returncode = 1
             error = f"{type(e).__name__}: {str(e)}"
             stderr_capture.write(error)
+        finally:
+            # Cancel the alarm
+            try:
+                signal.alarm(0)
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+            except (AttributeError, ValueError):
+                pass
 
         execution_time = time.time() - start_time
 
