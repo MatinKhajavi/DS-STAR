@@ -6,6 +6,8 @@ Simplified executor that allows LLM-generated code to run with minimal restricti
 import io
 import time
 import signal
+import traceback
+import sys
 from contextlib import redirect_stdout, redirect_stderr
 from typing import Any, Dict, Optional
 
@@ -61,6 +63,8 @@ class CodeExecutor:
         
         if '__builtins__' not in globals_dict:
             globals_dict['__builtins__'] = __builtins__
+        
+        globals_dict['__name__'] = '__main__'
 
         old_handler = None
         try:
@@ -69,19 +73,32 @@ class CodeExecutor:
         except (AttributeError, ValueError):
             pass
 
+        print(f"[EXECUTOR] Starting code execution (timeout={self.timeout}s)...", file=sys.stderr, flush=True)
+        
         try:
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 exec(code, globals_dict)
+            print(f"[EXECUTOR] Code execution completed successfully", file=sys.stderr, flush=True)
         except TimeoutException as e:
             returncode = 1
             error = f"TimeoutException: Code execution exceeded {self.timeout} seconds"
+            stderr_capture.write(error)
+        except KeyboardInterrupt:
+            returncode = 1
+            error = "KeyboardInterrupt: Execution interrupted by user"
+            stderr_capture.write(error)
+            raise
+        except SystemExit as e:
+            returncode = 1
+            error = f"SystemExit: Code called sys.exit({e.code})"
             stderr_capture.write(error)
         except Exception as e:
             returncode = 1
             error = f"{type(e).__name__}: {str(e)}"
             stderr_capture.write(error)
+            full_trace = traceback.format_exc()
+            stderr_capture.write(f"\n\nFull traceback:\n{full_trace}")
         finally:
-            # Cancel the alarm
             try:
                 signal.alarm(0)
                 if old_handler is not None:
