@@ -1,5 +1,5 @@
 # DS-STAR
-Implementation of the paper "DS-STAR: Data Science Agent via Iterative Planning and Verification". The system follows the paper's multi-agent pipeline to analyze tabular/JSON/markdown data, plan an analysis, implement code, verify sufficiency, and auto-debug until a final answer is produced.
+Implementation of the paper "DS-STAR: A state-of-the-art versatile data science agent". The system follows the paper's multi-agent pipeline to analyze tabular/JSON/markdown data, plan an analysis, implement code, verify sufficiency, and auto-debug until a final answer is produced.
 
 ## Project structure
 ```
