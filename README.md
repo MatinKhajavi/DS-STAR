@@ -14,7 +14,7 @@ src/                    # DS-STAR implementation
   cli/main.py           # CLI entrypoint
   core/                 # Orchestrator, prompts, executor, data models
   agents/               # Analyzer, Planner, Coder, Verifier, Router, Debugger, Finalizer
-  llm/                  # Gemini client (primary), OpenAI/Anthropic stubs
+  llm/                  # LLM clients: Gemini, OpenAI, Anthropic
   utils/                # Filesystem + logging helpers
 pyproject.toml          # Poetry project (Python 3.13+)
 ```
@@ -39,9 +39,10 @@ DS-STAR orchestrates specialist LLM agents: Analyzer profiles every file; Planne
    poetry install
    ```
 
-3) Configure LLM credentials (Gemini is the only provider fully wired end-to-end right now)  
-   - `GEMINI_API_KEY` or `GOOGLE_API_KEY`  
-   - OpenAI/Anthropic clients exist, but the orchestrator currently raises `NotImplementedError` for them.  
+3) Configure LLM credentials  
+   - **Gemini**: `GEMINI_API_KEY` or `GOOGLE_API_KEY`  
+   - **OpenAI**: `OPENAI_API_KEY`  
+   - **Anthropic**: `ANTHROPIC_API_KEY`  
 
 4) (Optional) Hugging Face token if your environment requires authentication for `adyen/DABstep` pulls.
 
@@ -92,7 +93,7 @@ print(answer)
 - Parallel/offset workflows: see `evaluations/run_parallel.sh` and `evaluations/run_missing_tasks.py`; merge outputs with `evaluations/combine_results.sh`.
 
 ## Configuration knobs (src/config.py)
-- `llm`: `provider` (`gemini`), `model`, `api_key`
+- `llm`: `provider` (`gemini`, `openai`, `anthropic`), `model`, `api_key`
 - `max_rounds`: Max refinement iterations in Algorithm 1
 - `data_dir`: Source data directory (analyzer runs over all files)
 - `execution`: `max_retries`, `capture_output`
