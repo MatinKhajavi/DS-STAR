@@ -88,7 +88,10 @@ class DSStar:
                 api_key=llm_config.api_key,
             )
         elif llm_config.provider == "anthropic":
-            raise NotImplementedError("Anthropic is not supported yet")
+            return AnthropicClient(
+                model=llm_config.model,
+                api_key=llm_config.api_key,
+            )
         else:
             raise ValueError(f"Unsupported LLM provider: {llm_config.provider}")
 
