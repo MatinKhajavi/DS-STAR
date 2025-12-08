@@ -10,7 +10,7 @@ try:
 except ImportError:
     RICH_AVAILABLE = False
 
-from ds_star import DSStar
+from src import DSStar
 from src.config import DSStarConfig, LLMConfig
 
 
