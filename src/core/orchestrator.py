@@ -83,7 +83,10 @@ class DSStar:
                 api_key=llm_config.api_key,
             )
         elif llm_config.provider == "openai":
-            raise NotImplementedError("OpenAI is not supported yet")
+            return OpenAIClient(
+                model=llm_config.model,
+                api_key=llm_config.api_key,
+            )
         elif llm_config.provider == "anthropic":
             raise NotImplementedError("Anthropic is not supported yet")
         else:
