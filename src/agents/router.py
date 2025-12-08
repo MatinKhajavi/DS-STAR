@@ -47,7 +47,6 @@ class RouterAgent:
         """
         self.logger.info(f"Routing decision for plan with {len(plan)} steps")
 
-        # Format data descriptions
         filenames = ", ".join([desc.file.filename for desc in data_descriptions])
         formatted_desc = "\n\n".join(
             [
@@ -57,7 +56,6 @@ class RouterAgent:
             ]
         )
 
-        # Format current plan
         plan_text = "\n".join([str(step) for step in plan])
 
         prompt = ROUTER_PROMPT.format(
@@ -70,33 +68,32 @@ class RouterAgent:
         )
 
         response = self.llm.chat(prompt).strip()
+        response_lower = response.lower()
 
-        # Parse response
-        # Look for "Add Step" or "Step N"
-        if "add step" in response.lower():
+        if "add" in response_lower and "step" in response_lower:
             decision = RouterDecision.ADD_STEP
             step_to_remove = None
             self.logger.info("Router decision: Add next step")
         else:
-            # Try to extract step number
             match = re.search(r"step\s+(\d+)", response, re.IGNORECASE)
             if match:
                 step_num = int(match.group(1))
-                # Validate step number
-                if 1 <= step_num <= len(plan):
+                if any(step.step_number == step_num for step in plan):
                     decision = RouterDecision.REMOVE_STEP
-                    step_to_remove = step_num
-                    self.logger.info(f"Router decision: Remove step {step_num}")
+                    step_to_remove = step_num  # Store step number as-is
+                    self.logger.info(f"Router decision: Remove Step {step_num}")
                 else:
-                    # Invalid step number, default to add
                     self.logger.warning(
-                        f"Invalid step number {step_num}, defaulting to Add Step"
+                        f"Invalid step number {step_num} (not in current plan), "
+                        f"defaulting to Add Step"
                     )
                     decision = RouterDecision.ADD_STEP
                     step_to_remove = None
             else:
-                # Can't parse, default to add
-                self.logger.warning(f"Could not parse router response: {response}")
+                self.logger.warning(
+                    f"Could not parse router response: '{response[:100]}', "
+                    f"defaulting to Add Step"
+                )
                 decision = RouterDecision.ADD_STEP
                 step_to_remove = None
 

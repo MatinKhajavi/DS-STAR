@@ -106,9 +106,10 @@ class DebuggerAgent:
         max_retries: int,
         is_analyzer: bool = False,
         data_descriptions: List[DataDescription] = None,
+        executor=None,
     ) -> str:
         """
-        Attempt to fix code with multiple retries.
+        Attempt to fix code with multiple retries, optionally verifying each fix.
 
         Args:
             code: Original failing code
@@ -116,9 +117,10 @@ class DebuggerAgent:
             max_retries: Maximum retry attempts
             is_analyzer: Whether this is an analyzer script
             data_descriptions: Data descriptions (for solution scripts)
+            executor: Optional executor to verify fixes (if None, just returns fixed code without verification)
 
         Returns:
-            Fixed code (or original if all retries fail)
+            Fixed code (or last attempt if all retries fail)
         """
         current_code = code
         current_error = error
@@ -128,16 +130,28 @@ class DebuggerAgent:
 
             try:
                 if is_analyzer:
-                    current_code = self.fix_analyzer_script(current_code, current_error)
+                    fixed_code = self.fix_analyzer_script(current_code, current_error)
                 else:
-                    current_code = self.fix_solution_script(
+                    fixed_code = self.fix_solution_script(
                         current_code, current_error, data_descriptions or []
                     )
-                return current_code
+                
+                if executor:
+                    result = executor.execute(fixed_code)
+                    if result.success:
+                        self.logger.info(f"✓ Fix verified on attempt {attempt + 1}")
+                        return fixed_code
+                    else:
+                        self.logger.warning(f"✗ Fix attempt {attempt + 1} still fails")
+                        current_code = fixed_code
+                        current_error = result.stderr or result.error or "Unknown error"
+                else:
+                    return fixed_code
+                    
             except Exception as e:
-                self.logger.warning(f"Debug attempt {attempt + 1} failed: {e}")
+                self.logger.warning(f"Debug attempt {attempt + 1} failed with exception: {e}")
                 current_error = str(e)
 
-        # If all retries fail, return the last attempt
+        self.logger.warning(f"All {max_retries} debug attempts failed")
         return current_code
 

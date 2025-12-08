@@ -58,7 +58,7 @@ class PlannerAgent:
         )
 
         response = self.llm.chat(prompt)
-        return PlanStep(step_number=0, description=response.strip())
+        return PlanStep(step_number=1, description=response.strip())
 
     def generate_next_step(
         self,
@@ -95,5 +95,6 @@ class PlannerAgent:
         )
 
         response = self.llm.chat(prompt)
-        return PlanStep(step_number=len(current_plan), description=response.strip())
+        next_step_number = current_plan[-1].step_number + 1 if current_plan else 1
+        return PlanStep(step_number=next_step_number, description=response.strip())
 

@@ -38,11 +38,11 @@ class AnalyzerAgent:
         Analyze a data file and generate its description.
 
         This method generates a script, executes it, and uses the output
-        as the file description. If execution fails, it retries.
+        as the file description. If execution fails, it retries with regeneration.
 
         Args:
             data_file: The data file to analyze
-            max_retries: Maximum number of retry attempts
+            max_retries: Maximum number of retry attempts (default: 3)
 
         Returns:
             DataDescription with the analysis results
@@ -50,27 +50,39 @@ class AnalyzerAgent:
         self.logger.info(f"Analyzing file: {data_file.filename}")
 
         script = self.generate_script(data_file)
-        result = self.executor.execute(script)
+        
+        for attempt in range(max_retries):
+            result = self.executor.execute(script)
 
-        # Return immediately if successful
-        if result.success:
-            return DataDescription(
-                file=data_file,
-                script=script,
-                description=result.stdout,
-            )
+            if result.success:
+                if attempt > 0:
+                    self.logger.info(
+                        f"✓ Analysis succeeded on attempt {attempt + 1}/{max_retries}"
+                    )
+                return DataDescription(
+                    file=data_file,
+                    script=script,
+                    description=result.stdout,
+                )
 
-        # Log the initial error
-        self.logger.warning(
-            f"Script execution failed for {data_file.filename}: {result.error}"
-        )
+            error_msg = result.stderr or result.error or "Unknown error"
+            if attempt < max_retries - 1:
+                self.logger.warning(
+                    f"Script execution failed for {data_file.filename} "
+                    f"(attempt {attempt + 1}/{max_retries}), retrying..."
+                )
+                script = self.generate_script(data_file)
+            else:
+                self.logger.warning(
+                    f"Script execution failed for {data_file.filename} after "
+                    f"{max_retries} attempts: {error_msg[:200]}"
+                )
 
-        # If failed, we'll let the debugger handle it (in orchestrator)
         return DataDescription(
             file=data_file,
             script=script,
             description="",
-            error=result.error or result.stderr,
+            error=result.stderr or result.error or "",
         )
 
     def analyze_files(self, data_files: List[DataFile]) -> List[DataDescription]:

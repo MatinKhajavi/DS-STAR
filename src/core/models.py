@@ -96,7 +96,7 @@ class RouterResult:
     """Result from the router agent."""
     
     decision: RouterDecision
-    step_to_remove: Optional[int] = None  # If decision is REMOVE_STEP
+    step_to_remove: Optional[int] = None
     reasoning: Optional[str] = None
 
 

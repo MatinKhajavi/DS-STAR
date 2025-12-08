@@ -49,11 +49,15 @@ class VerifierAgent:
             question=question,
         )
 
-        response = self.llm.chat(prompt).strip().lower()
+        response = self.llm.chat(prompt).strip()
+        response_lower = response.lower()
 
-        if "yes" in response:
+        if "yes" in response_lower and "no" not in response_lower:
             status = VerificationStatus.SUFFICIENT
+        elif "no" in response_lower:
+            status = VerificationStatus.INSUFFICIENT
         else:
+            self.logger.warning(f"Unclear verification response: {response[:100]}, defaulting to INSUFFICIENT")
             status = VerificationStatus.INSUFFICIENT
 
         self.logger.info(f"Verification result: {status.value}")

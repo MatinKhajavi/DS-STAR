@@ -110,17 +110,32 @@ class DSStar:
 
             if desc.error:
                 self.logger.warning(f"Analysis failed for {data_file.path}: {desc.error[:200]}")
-                self.logger.info(f"Attempting to debug {data_file.filename}...")
-                fixed_script = self.debugger.fix_analyzer_script(desc.script, desc.error)
+                current_code = desc.script
+                current_error = desc.error
+                max_retries = self.config.execution.max_retries
+                
+                for attempt in range(max_retries):
+                    self.logger.info(f"Attempting to debug {data_file.filename}... ({attempt + 1}/{max_retries})")
+                    try:
+                        fixed_script = self.debugger.fix_analyzer_script(current_code, current_error)
+                    except Exception as e:
+                        self.logger.error(f"Debugger failed on analyzer script: {e}")
+                        break
 
-                result = self.executor.execute(fixed_script)
-                if result.success:
-                    desc.script = fixed_script
-                    desc.description = result.stdout
-                    desc.error = None
-                    self.logger.info(f"✓ Successfully fixed analyzer for {data_file.filename}")
-                else:
-                    self.logger.error(f"✗ Could not fix analyzer for {data_file.filename}: {result.error[:200] if result.error else 'Unknown error'}")
+                    result = self.executor.execute(fixed_script)
+                    if result.success:
+                        desc.script = fixed_script
+                        desc.description = result.stdout
+                        desc.error = None
+                        self.logger.info(f"✓ Successfully fixed analyzer for {data_file.filename}")
+                        break
+
+                    current_code = fixed_script
+                    current_error = result.stderr or result.error
+                    self.logger.warning(f"Analyzer fix attempt failed: {current_error[:200] if current_error else 'Unknown error'}")
+
+                if desc.error:
+                    self.logger.error(f"✗ Could not fix analyzer for {data_file.filename} after {max_retries} attempts")
 
             else:
                 self.logger.info(f"✓ Successfully analyzed {data_file.filename}")
@@ -180,27 +195,51 @@ class DSStar:
 
     def _execute_with_debug(
         self, code: str, data_descriptions: List[DataDescription]
-    ) -> ExecutionResult:
+    ) -> tuple[str, ExecutionResult]:
         """
         Execute code with automatic debugging on failure.
 
-        Args:
-            code: Code to execute
-            data_descriptions: Available data descriptions
-
-        Returns:
-            Execution result
+        Returns the possibly-updated code along with the execution result.
         """
-        result = self.executor.execute(code)
+        max_retries = self.config.execution.max_retries
+        attempt = 0
+        code_to_run = code
+        result = self.executor.execute(code_to_run)
 
-        if not result.success:
-            self.logger.warning("Execution failed, attempting to debug")
-            fixed_code = self.debugger.fix_solution_script(
-                code, result.error or result.stderr, data_descriptions
-            )
-            result = self.executor.execute(fixed_code)
+        while not result.success and attempt < max_retries:
+            attempt += 1
+            self.logger.warning(f"Execution failed, attempting to debug (attempt {attempt}/{max_retries})")
 
-        return result
+            try:
+                bug_report = result.stderr or result.error or ""
+                code_to_run = self.debugger.fix_solution_script(
+                    code_to_run, bug_report, data_descriptions
+                )
+            except Exception as e:
+                self.logger.error(f"Debugger failed to produce a fix: {e}")
+                break
+
+            result = self.executor.execute(code_to_run)
+
+        return code_to_run, result
+
+    def _build_code_for_plan(
+        self, plan: List[PlanStep], data_descriptions: List[DataDescription]
+    ) -> tuple[str, ExecutionResult]:
+        """
+        Rebuild code and execution result to match the current plan (used after backtracking).
+        """
+        if not plan:
+            return "", ExecutionResult(stdout="", stderr="", returncode=0, execution_time=0.0, error=None)
+
+        code = self.coder.implement_initial_plan(plan[0], data_descriptions)
+        code, result = self._execute_with_debug(code, data_descriptions)
+
+        for idx in range(1, len(plan)):
+            code = self.coder.implement_plan(plan[: idx + 1], data_descriptions, code)
+            code, result = self._execute_with_debug(code, data_descriptions)
+
+        return code, result
 
     def run(
         self,
@@ -261,7 +300,7 @@ class DSStar:
         self.logger.info(f"Generated code ({len(code)} chars), executing...")
         
         try:
-            result = self._execute_with_debug(code, data_descriptions)
+            code, result = self._execute_with_debug(code, data_descriptions)
             self.logger.info(f"Initial plan executed: {result.success}")
             if not result.success:
                 self.logger.warning(f"Execution failed: {result.error}")
@@ -300,9 +339,11 @@ class DSStar:
             iteration.router_result = router_result
 
             if router_result.decision == RouterDecision.REMOVE_STEP:
-                remove_idx = router_result.step_to_remove
-                plan = plan[: remove_idx]  # Keep steps 0 to remove_idx-1
-                self.logger.info(f"Truncated plan to {len(plan)} steps")
+                remove_idx = router_result.step_to_remove  # Step number to remove
+                if remove_idx:
+                    plan = [step for step in plan if step.step_number < remove_idx]
+                    self.logger.info(f"Truncated plan to {len(plan)} steps (removed step {remove_idx} and beyond)")
+                    code, result = self._build_code_for_plan(plan, data_descriptions)
 
             next_step = self.planner.generate_next_step(
                 question, data_descriptions, plan, result.output
@@ -310,9 +351,9 @@ class DSStar:
 
             plan.append(next_step)
 
-            code = self.coder.implement_plan(plan, data_descriptions, code)
+            code = self.coder.implement_plan(plan, data_descriptions, code if plan else None)
 
-            result = self._execute_with_debug(code, data_descriptions)
+            code, result = self._execute_with_debug(code, data_descriptions)
 
             self.logger.info(
                 f"Round {round_num + 1}: plan has {len(plan)} steps, "
